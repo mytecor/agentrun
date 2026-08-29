@@ -1,5 +1,3 @@
-//go:build !windows
-
 package acp
 
 import (
@@ -13,7 +11,6 @@ import (
 	"regexp"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/dmora/agentrun"
@@ -310,7 +307,7 @@ func (p *process) Stop(ctx context.Context) error {
 		p.cancel()
 
 		// SIGTERM → grace → SIGKILL.
-		_ = signalProcess(p.cmd.Process, syscall.SIGTERM)
+		_ = requestStop(p.cmd.Process)
 
 		select {
 		case <-p.done:

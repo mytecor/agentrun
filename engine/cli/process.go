@@ -1,5 +1,3 @@
-//go:build !windows
-
 package cli
 
 import (
@@ -11,7 +9,6 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/dmora/agentrun"
@@ -247,7 +244,7 @@ func (p *process) Stop(ctx context.Context) error {
 		cancelRead()
 
 		// Send SIGTERM for graceful termination.
-		_ = signalProcess(cmd.Process, syscall.SIGTERM)
+		_ = requestStop(cmd.Process)
 
 		// Wait for readLoop to finish, with grace period.
 		select {
@@ -690,7 +687,7 @@ func (p *process) replaceSubprocess(ctx context.Context, message string) error {
 	p.mu.Unlock()
 
 	oldCancel()
-	_ = signalProcess(oldCmd.Process, syscall.SIGTERM)
+	_ = requestStop(oldCmd.Process)
 
 	// Wait for old readLoop to finish.
 	select {
