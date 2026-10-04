@@ -181,7 +181,7 @@ func (b *Backend) ListModels(ctx context.Context, session agentrun.Session) ([]a
 		return nil, ctx.Err()
 	}
 	if runErr != nil {
-		return nil, fmt.Errorf("%w: Claude CLI control protocol: %v", agentrun.ErrModelDiscoveryUnsupported, runErr)
+		return nil, fmt.Errorf("%w: Claude CLI control protocol: %w", agentrun.ErrModelDiscoveryUnsupported, runErr)
 	}
 	return nil, fmt.Errorf("%w: Claude CLI returned no initialize control response", agentrun.ErrModelDiscoveryUnsupported)
 }
@@ -205,6 +205,26 @@ type discoveryEnvelope struct {
 	} `json:"response"`
 }
 
+func convertDiscoveryModels(rawModels []discoveryModel) []agentrun.ModelInfo {
+	models := make([]agentrun.ModelInfo, 0, len(rawModels))
+	for _, raw := range rawModels {
+		id := errfmt.SanitizeCode(raw.Value)
+		if id == "" {
+			continue
+		}
+		model := agentrun.ModelInfo{
+			ID:          id,
+			Name:        errfmt.SanitizeCode(raw.DisplayName),
+			Description: errfmt.Truncate(raw.Description),
+		}
+		if resolvedID := errfmt.SanitizeCode(raw.ResolvedModel); resolvedID != "" && resolvedID != id {
+			model.Aliases = []string{resolvedID}
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
 func parseModelDiscovery(output []byte) ([]agentrun.ModelInfo, bool, error) {
 	for _, line := range bytes.Split(output, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
@@ -217,23 +237,7 @@ func parseModelDiscovery(output []byte) ([]agentrun.ModelInfo, bool, error) {
 		if envelope.Response.Subtype != "success" {
 			return nil, true, fmt.Errorf("%w: %s", agentrun.ErrModelDiscoveryUnsupported, envelope.Response.Error)
 		}
-		models := make([]agentrun.ModelInfo, 0, len(envelope.Response.Response.Models))
-		for _, raw := range envelope.Response.Response.Models {
-			id := errfmt.SanitizeCode(raw.Value)
-			if id == "" {
-				continue
-			}
-			model := agentrun.ModelInfo{
-				ID:          id,
-				Name:        errfmt.SanitizeCode(raw.DisplayName),
-				Description: errfmt.Truncate(raw.Description),
-			}
-			if resolvedID := errfmt.SanitizeCode(raw.ResolvedModel); resolvedID != "" && resolvedID != id {
-				model.Aliases = []string{resolvedID}
-			}
-			models = append(models, model)
-		}
-		return models, true, nil
+		return convertDiscoveryModels(envelope.Response.Response.Models), true, nil
 	}
 	return nil, false, nil
 }

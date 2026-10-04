@@ -114,7 +114,7 @@ type modelListingBackend struct {
 }
 
 func (b *modelListingBackend) ListModels(context.Context, agentrun.Session) ([]agentrun.ModelInfo, error) {
-	return agentrun.CloneModelCatalog(b.models), b.err
+	return b.models, b.err
 }
 
 func (b *testStreamerOnlyBackend) StreamArgs(s agentrun.Session) (string, []string) {
@@ -182,20 +182,9 @@ func withResumer(tb testBackend) *testResumerBackend {
 var _ agentrun.Engine = (*cli.Engine)(nil)
 var _ agentrun.ModelLister = (*cli.Engine)(nil)
 
-func TestModelDiscoverySelectionAndInitEnrichment(t *testing.T) {
-	base := withResumer(testBackend{
-		spawnFn: func(_ agentrun.Session) (string, []string) {
-			return binPrintf, []string{"init\\n__RESULT__\\n"}
-		},
-		parseFn: func(line string) (agentrun.Message, error) {
-			if line == "init" {
-				return agentrun.Message{Type: agentrun.MessageInit}, nil
-			}
-			return resultParser(line)
-		},
-	})
+func TestEngine_ListModels(t *testing.T) {
 	backend := &modelListingBackend{
-		testResumerBackend: base,
+		testResumerBackend: echoResumerBackend(),
 		models:             []agentrun.ModelInfo{{ID: "model-a", Name: "Model A", Aliases: []string{"a"}}},
 	}
 	engine := cli.NewEngine(backend)
@@ -204,29 +193,28 @@ func TestModelDiscoverySelectionAndInitEnrichment(t *testing.T) {
 	if err != nil || !agentrun.ModelAvailable(models, "a") {
 		t.Fatalf("ListModels = %+v, %v", models, err)
 	}
-	proc, err := engine.Start(testCtx(t), agentrun.Session{CWD: tempDir(t), Model: "a"})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	msgs := drain(proc)
-	if len(msgs) < 1 || msgs[0].Init == nil {
-		t.Fatalf("messages = %+v", msgs)
-	}
-	if msgs[0].Init.Model != "a" || !agentrun.ModelAvailable(msgs[0].Init.AvailableModels, "model-a") {
-		t.Fatalf("init = %+v", msgs[0].Init)
+}
+
+func TestEngine_ListModels_Unsupported(t *testing.T) {
+	engine := cli.NewEngine(echoResumerBackend())
+	_, err := engine.ListModels(testCtx(t), agentrun.Session{CWD: tempDir(t)})
+	if !errors.Is(err, agentrun.ErrModelDiscoveryUnsupported) {
+		t.Fatalf("error = %v, want ErrModelDiscoveryUnsupported", err)
 	}
 }
 
-func TestModelDiscoveryRejectsUnsupportedModel(t *testing.T) {
+func TestEngine_Start_AdvisoryModelSelection(t *testing.T) {
 	backend := &modelListingBackend{
 		testResumerBackend: echoResumerBackend(),
 		models:             []agentrun.ModelInfo{{ID: "model-a"}},
 	}
 	engine := cli.NewEngine(backend)
-	_, err := engine.Start(testCtx(t), agentrun.Session{CWD: tempDir(t), Model: "missing"})
-	if !errors.Is(err, agentrun.ErrModelNotSupported) {
-		t.Fatalf("error = %v, want ErrModelNotSupported", err)
+	// CLI model catalog is advisory; Start does not call ListModels or reject unlisted models.
+	proc, err := engine.Start(testCtx(t), agentrun.Session{CWD: tempDir(t), Model: "custom-unlisted-model"})
+	if err != nil {
+		t.Fatalf("Start should succeed for unlisted model: %v", err)
 	}
+	_ = proc.Stop(testCtx(t))
 }
 
 // ---------------------------------------------------------------------------

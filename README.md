@@ -226,11 +226,12 @@ if lister, ok := any(engine).(agentrun.ModelLister); ok {
 }
 ```
 
-Set `Session.Model` (or use `WithModel`) before `Start`. If the backend
-advertises a finite catalog, an unknown ID returns
-`*agentrun.ModelNotSupportedError`; otherwise the value is passed through to
-the backend's native selector. `MessageInit.Init.Model` reports the effective
-selection for new and resumed sessions.
+Set `Session.Model` (or use `WithModel`) before `Start`. CLI backends pass
+the requested model directly through to native flags (discovery is advisory via
+`ListModels`). In ACP, where the agent advertises its supported model catalog
+authoritatively, an unknown ID returns `*agentrun.ModelNotSupportedError`.
+`MessageInit.Init.Model` reports the effective selection for new and resumed
+sessions.
 
 ## Error Handling
 

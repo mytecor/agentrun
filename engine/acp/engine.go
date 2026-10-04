@@ -46,6 +46,10 @@ func (e *Engine) Validate() error {
 
 // ListModels performs the ACP initialization/session handshake without a model
 // turn and returns the catalog advertised by session/new or session/load.
+//
+// Note: this creates and immediately stops a real session (Start -> session/new
+// -> Stop). For agents that persist sessions remotely or on disk, callers should
+// be aware of the lifecycle cost of creating and discarding that session.
 func (e *Engine) ListModels(ctx context.Context, session agentrun.Session) ([]agentrun.ModelInfo, error) {
 	session.Model = ""
 	process, err := e.Start(ctx, session)
@@ -59,7 +63,7 @@ func (e *Engine) ListModels(ctx context.Context, session agentrun.Session) ([]ag
 		if !ok || msg.Type != agentrun.MessageInit || msg.Init == nil || len(msg.Init.AvailableModels) == 0 {
 			return nil, agentrun.ErrModelDiscoveryUnsupported
 		}
-		return agentrun.CloneModelCatalog(msg.Init.AvailableModels), nil
+		return append([]agentrun.ModelInfo(nil), msg.Init.AvailableModels...), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

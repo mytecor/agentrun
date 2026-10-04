@@ -601,11 +601,13 @@ func TestStopReasonConstants(t *testing.T) {
 
 // --- InitMeta JSON tests ---
 
+const testInitMetaModel = "claude-sonnet-4-5-20250514"
+
 func TestInitMeta_JSON_RoundTrip(t *testing.T) {
 	meta := InitMeta{
-		Model: "claude-sonnet-4-5-20250514",
+		Model: testInitMetaModel,
 		AvailableModels: []ModelInfo{{
-			ID:          "claude-sonnet-4-5-20250514",
+			ID:          testInitMetaModel,
 			Name:        "Sonnet",
 			Description: "Balanced",
 			Aliases:     []string{"sonnet"},
@@ -650,7 +652,7 @@ func TestMessageJSON_WithInit(t *testing.T) {
 	msg := Message{
 		Type:     MessageInit,
 		ResumeID: "ses_abc",
-		Init:     &InitMeta{Model: "claude-sonnet-4-5-20250514"},
+		Init:     &InitMeta{Model: testInitMetaModel},
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -663,8 +665,8 @@ func TestMessageJSON_WithInit(t *testing.T) {
 	if got.Init == nil {
 		t.Fatal("Init should be populated")
 	}
-	if got.Init.Model != "claude-sonnet-4-5-20250514" {
-		t.Errorf("Init.Model = %q, want %q", got.Init.Model, "claude-sonnet-4-5-20250514")
+	if got.Init.Model != testInitMetaModel {
+		t.Errorf("Init.Model = %q, want %q", got.Init.Model, testInitMetaModel)
 	}
 }
 

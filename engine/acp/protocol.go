@@ -256,7 +256,3 @@ type setConfigOptionParams struct {
 	ConfigID  string `json:"configId"`
 	Value     string `json:"value"`
 }
-
-type setConfigOptionResult struct {
-	ConfigOptions []sessionConfigOption `json:"configOptions"`
-}

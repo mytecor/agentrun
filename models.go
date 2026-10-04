@@ -1,7 +1,7 @@
 package agentrun
 
-// CloneModelCatalog returns a deep copy of models.
-func CloneModelCatalog(models []ModelInfo) []ModelInfo {
+// cloneModelCatalog returns a deep copy of models.
+func cloneModelCatalog(models []ModelInfo) []ModelInfo {
 	if models == nil {
 		return nil
 	}
@@ -36,5 +36,5 @@ func ValidateModelSelection(models []ModelInfo, id string) error {
 	if id == "" || len(models) == 0 || ModelAvailable(models, id) {
 		return nil
 	}
-	return &ModelNotSupportedError{Model: id, Available: CloneModelCatalog(models)}
+	return &ModelNotSupportedError{Model: id, Available: cloneModelCatalog(models)}
 }

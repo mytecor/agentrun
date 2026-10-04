@@ -60,15 +60,33 @@ func (e *Engine) ListModels(ctx context.Context, session agentrun.Session) ([]ag
 	if err != nil {
 		return nil, err
 	}
-	return agentrun.CloneModelCatalog(models), nil
+	return models, nil
+}
+
+func validateCWD(cwd string) error {
+	if !filepath.IsAbs(cwd) {
+		return fmt.Errorf("cli: CWD must be an absolute path, got %q", cwd)
+	}
+	info, err := os.Stat(cwd)
+	if err != nil {
+		return fmt.Errorf("cli: CWD: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("cli: CWD is not a directory: %s", cwd)
+	}
+	return nil
 }
 
 // Start initializes a subprocess session and returns a Process handle.
 // Returns [agentrun.ErrSendNotSupported] if the backend lacks a send path
 // (neither Streamer+InputFormatter nor Resumer).
-// The context parameter is reserved for future use (e.g., start timeout);
-// subprocess lifetime is controlled via [agentrun.Process.Stop].
+// If ctx is cancelled before start, Start returns ctx.Err().
+// Subprocess lifetime is controlled via [agentrun.Process.Stop].
 func (e *Engine) Start(ctx context.Context, session agentrun.Session, opts ...agentrun.Option) (agentrun.Process, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	startOpts := agentrun.ResolveOptions(opts...)
 
 	// Deep-copy session to prevent aliasing.
@@ -83,15 +101,8 @@ func (e *Engine) Start(ctx context.Context, session agentrun.Session, opts ...ag
 	}
 
 	// Validate CWD.
-	if !filepath.IsAbs(session.CWD) {
-		return nil, fmt.Errorf("cli: CWD must be an absolute path, got %q", session.CWD)
-	}
-	info, err := os.Stat(session.CWD)
-	if err != nil {
-		return nil, fmt.Errorf("cli: CWD: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("cli: CWD is not a directory: %s", session.CWD)
+	if err := validateCWD(session.CWD); err != nil {
+		return nil, err
 	}
 
 	// Validate cross-cutting options early (before SpawnArgs/StreamArgs).
@@ -129,27 +140,12 @@ func (e *Engine) Start(ctx context.Context, session agentrun.Session, opts ...ag
 	}
 	env := agentrun.MergeEnv(os.Environ(), session.Env)
 
-	// Discovery is optional. A backend/version that cannot enumerate models
-	// remains compatible and still receives Session.Model through native args.
-	var models []agentrun.ModelInfo
-	if caps.modelLister != nil {
-		discovered, discoverErr := caps.modelLister.ListModels(ctx, session)
-		if discoverErr == nil {
-			models = discovered
-			if err := agentrun.ValidateModelSelection(models, session.Model); err != nil {
-				return nil, err
-			}
-		} else if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-	}
-
 	cmd, stdin, stdout, err := spawnCmd(resolvedBinary, args, session.CWD, useStreamer, env, e.opts.StderrWriter)
 	if err != nil {
 		return nil, fmt.Errorf("cli: start: %w", err)
 	}
 
-	p := newProcess(e.backend, caps, session, e.opts, env, models, cmd, stdin, stdout)
+	p := newProcess(e.backend, caps, session, e.opts, env, cmd, stdin, stdout)
 	if caps.resumer != nil && !useStreamer {
 		return &sequentialProcess{p}, nil
 	}
