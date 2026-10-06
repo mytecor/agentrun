@@ -495,6 +495,42 @@ func TestSessionClone_NilMaps(t *testing.T) {
 	}
 }
 
+func TestSessionClone_MCPServers(t *testing.T) {
+	original := Session{
+		ID: "s1",
+		MCPServers: []MCPServer{
+			{Name: "tools", Command: "tool-server", Args: []string{"--stdio", "--x"}},
+			{Name: "client-tools", Command: "client-tools-mcp"},
+		},
+	}
+	cloned := original.Clone()
+
+	// Mutating the clone's slice and nested Args must not affect the original.
+	cloned.MCPServers[0].Name = "mutated"
+	cloned.MCPServers[0].Args = append(cloned.MCPServers[0].Args, "--extra")
+	cloned.MCPServers = append(cloned.MCPServers, MCPServer{Name: "extra"})
+
+	if len(original.MCPServers) != 2 {
+		t.Fatalf("original MCPServers length = %d, want 2", len(original.MCPServers))
+	}
+	if original.MCPServers[0].Name != "tools" {
+		t.Errorf("original MCPServers[0].Name = %q, want %q", original.MCPServers[0].Name, "tools")
+	}
+	if len(original.MCPServers[0].Args) != 2 {
+		t.Errorf("original MCPServers[0].Args length = %d, want 2", len(original.MCPServers[0].Args))
+	}
+}
+
+func TestSessionClone_NilMCPServers(t *testing.T) {
+	original := Session{ID: "s1"}
+	cloned := original.Clone()
+
+	// Clone of nil MCPServers should remain nil.
+	if cloned.MCPServers != nil {
+		t.Errorf("Clone of nil MCPServers should be nil, got %#v", cloned.MCPServers)
+	}
+}
+
 func TestSessionOptions_MapAliasing(t *testing.T) {
 	original := Session{
 		ID:      "s1",

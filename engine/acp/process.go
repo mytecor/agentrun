@@ -581,6 +581,31 @@ func availableACPModels(models *sessionModelState, configOptions []sessionConfig
 	return result
 }
 
+// toMCPServers translates root session MCP server descriptors into the ACP
+// wire representation. agentrun does not implement MCP — it only carries
+// these descriptors into session/new and session/load.
+//
+// Nil/empty input yields an empty (non-nil) slice so the wire value is
+// "mcpServers": [] rather than null. Server order is preserved.
+func toMCPServers(servers []agentrun.MCPServer) []mcpServer {
+	if len(servers) == 0 {
+		return []mcpServer{}
+	}
+	out := make([]mcpServer, len(servers))
+	for i, s := range servers {
+		args := s.Args
+		if args == nil {
+			args = []string{} // "args": [] on wire, never null
+		}
+		out[i] = mcpServer{
+			Name:    s.Name,
+			Command: s.Command,
+			Args:    append([]string{}, args...),
+		}
+	}
+	return out
+}
+
 // handshake performs initialize + session/new (or session/load), applies
 // session configuration, and then emits MessageInit with effective metadata.
 func (p *process) handshake(ctx context.Context, session agentrun.Session) error {
@@ -599,7 +624,7 @@ func (p *process) handshake(ctx context.Context, session agentrun.Session) error
 	var hr handshakeResult
 	var err error
 	if resumeID := session.Options[agentrun.OptionResumeID]; resumeID != "" {
-		hr, err = p.resumeSession(ctx, resumeID, session.CWD)
+		hr, err = p.resumeSession(ctx, resumeID, session.CWD, toMCPServers(session.MCPServers))
 	} else {
 		hr, err = p.openSession(ctx, session)
 	}
@@ -648,14 +673,14 @@ func (p *process) handshake(ctx context.Context, session agentrun.Session) error
 
 // resumeSession loads an existing session by ID.
 // Returns a handshakeResult (sessionID from resumeID, since LoadSessionResult has no sessionId).
-func (p *process) resumeSession(ctx context.Context, resumeID, cwd string) (handshakeResult, error) {
+func (p *process) resumeSession(ctx context.Context, resumeID, cwd string, mcpServers []mcpServer) (handshakeResult, error) {
 	if err := validateSessionID(resumeID); err != nil {
 		return handshakeResult{}, fmt.Errorf("%w: invalid resume ID: %w", agentrun.ErrSessionNotFound, err)
 	}
 	params := loadSessionParams{
 		SessionID:  resumeID,
 		CWD:        cwd,
-		MCPServers: []mcpServer{}, // empty slice, never nil
+		MCPServers: mcpServers, // empty slice stays [], never null
 	}
 	var result loadSessionResult
 	if err := p.conn.Call(ctx, MethodSessionLoad, params, &result); err != nil {
@@ -674,7 +699,7 @@ func (p *process) resumeSession(ctx context.Context, resumeID, cwd string) (hand
 func (p *process) openSession(ctx context.Context, session agentrun.Session) (handshakeResult, error) {
 	params := newSessionParams{
 		CWD:        session.CWD,
-		MCPServers: []mcpServer{}, // empty slice, never nil
+		MCPServers: toMCPServers(session.MCPServers), // empty slice stays [], never null
 	}
 	var result newSessionResult
 	if err := p.conn.Call(ctx, MethodSessionNew, params, &result); err != nil {

@@ -139,6 +139,28 @@ func (e Effort) Valid() bool {
 	return e == EffortLow || e == EffortMedium || e == EffortHigh
 }
 
+// MCPServer describes an MCP server to attach to a session.
+//
+// agentrun does not implement MCP — it only carries these server descriptors
+// and passes them through to backends that support them (e.g., ACP maps them
+// to the "mcpServers" field of session/new and session/load). Backends
+// without MCP support silently ignore the field.
+//
+// Only stdio servers are described at this stage: the consumer is expected to
+// run Command on PATH and connect over the spawned process's stdin/stdout.
+// No transport abstraction is provided — HTTP/WebSocket can be added later
+// when a real consumer needs them.
+type MCPServer struct {
+	// Name uniquely identifies the server within the session.
+	Name string
+
+	// Command is the server executable to spawn on stdio.
+	Command string
+
+	// Args are the command-line arguments passed to Command.
+	Args []string
+}
+
 // Session is the minimal session state passed to engines.
 //
 // Session is a value type — it carries identity and configuration but
@@ -180,14 +202,39 @@ type Session struct {
 	// variable names (e.g., LD_PRELOAD, PATH). Treat Session.Env like
 	// cmd.Env — the caller owns the security boundary.
 	Env map[string]string `json:"env,omitempty"`
+
+	// MCPServers lists MCP servers to attach to the session.
+	//
+	// agentrun does not implement MCP — it only passes these descriptors
+	// through to backends that support them (e.g., ACP maps them to the
+	// "mcpServers" field of session/new and session/load). Backends without
+	// MCP support silently ignore the field. When empty, the wire value is
+	// an empty array ([]), never null.
+	MCPServers []MCPServer `json:"mcpServers,omitempty"`
 }
 
-// Clone returns a deep copy of s, cloning the Options and Env maps.
+// Clone returns a deep copy of s, cloning the Options and Env maps and the
+// MCPServers slice (including each server's nested Args).
 // Use Clone before mutating a session that may be shared.
 func (s Session) Clone() Session {
 	s.Options = maps.Clone(s.Options)
 	s.Env = maps.Clone(s.Env)
+	if s.MCPServers != nil {
+		s.MCPServers = cloneMCPServers(s.MCPServers)
+	}
 	return s
+}
+
+// cloneMCPServers returns a deep copy of servers, copying each nested Args.
+func cloneMCPServers(servers []MCPServer) []MCPServer {
+	cloned := make([]MCPServer, len(servers))
+	for i, s := range servers {
+		cloned[i] = s
+		if s.Args != nil {
+			cloned[i].Args = append([]string(nil), s.Args...)
+		}
+	}
+	return cloned
 }
 
 // MergeEnv returns base with extra entries appended as "key=value" pairs.

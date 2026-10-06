@@ -4,6 +4,8 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/dmora/agentrun"
@@ -226,6 +228,90 @@ func TestEmitUpdate_ClosedChannelGuard(t *testing.T) {
 
 	// Must not panic on closed channel.
 	p.emitUpdate(agentrun.Message{Type: agentrun.MessageResult})
+}
+
+// --- toMCPServers mapping tests ---
+
+func TestToMCPServers_Empty(t *testing.T) {
+	got := toMCPServers(nil)
+	if got == nil {
+		t.Fatal("toMCPServers(nil) must not be nil (needs [] on wire)")
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+	// Empty slice must serialize as [] on the wire, not null.
+	b, err := json.Marshal(newSessionParams{MCPServers: got})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"mcpServers":[]`) {
+		t.Errorf("mcpServers should be [], got %s", b)
+	}
+	if strings.Contains(string(b), "null") {
+		t.Errorf("mcpServers must not be null, got %s", b)
+	}
+}
+
+func TestToMCPServers_One(t *testing.T) {
+	got := toMCPServers([]agentrun.MCPServer{
+		{Name: "tools", Command: "tool-server", Args: []string{"--stdio"}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	g := got[0]
+	if g.Name != "tools" || g.Command != "tool-server" {
+		t.Errorf("got %+v, want tools/tool-server", g)
+	}
+	if len(g.Args) != 1 || g.Args[0] != "--stdio" {
+		t.Errorf("Args = %v, want [--stdio]", g.Args)
+	}
+}
+
+func TestToMCPServers_NilArgs(t *testing.T) {
+	got := toMCPServers([]agentrun.MCPServer{
+		{Name: "client-tools", Command: "client-tools-mcp"},
+	})
+	// Acceptance: nil consumer Args must serialize as [], not null.
+	b, err := json.Marshal(newSessionParams{CWD: "/workspace", MCPServers: got})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"cwd":"/workspace","mcpServers":[{"name":"client-tools","command":"client-tools-mcp","args":[]}]}`
+	if string(b) != want {
+		t.Errorf("wire = %s\nwant  = %s", b, want)
+	}
+}
+
+func TestToMCPServers_MultipleOrder(t *testing.T) {
+	got := toMCPServers([]agentrun.MCPServer{
+		{Name: "first", Command: "a"},
+		{Name: "second", Command: "b"},
+		{Name: "third", Command: "c"},
+	})
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	for i, wantName := range []string{"first", "second", "third"} {
+		if got[i].Name != wantName {
+			t.Errorf("index %d: Name = %q, want %q", i, got[i].Name, wantName)
+		}
+	}
+}
+
+func TestToMCPServers_DoesNotAliasConsumer(t *testing.T) {
+	args := []string{"--stdio"}
+	servers := []agentrun.MCPServer{
+		{Name: "tools", Command: "tool-server", Args: args},
+	}
+	got := toMCPServers(servers)
+
+	// Mutating the wire slice's Args must not affect the consumer's session.
+	got[0].Args[0] = "mutated"
+	if args[0] != "--stdio" {
+		t.Errorf("consumer Args mutated: %v", args)
+	}
 }
 
 // --- buildInitMeta tests ---

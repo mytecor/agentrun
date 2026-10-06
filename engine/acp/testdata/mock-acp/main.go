@@ -20,6 +20,7 @@
 //	ACP_MOCK_MODE=rich-usage        — respond with extended usage (cache, thinking tokens)
 //	ACP_MOCK_MODE=no-usage          — respond with no usage at all (nil)
 //	ACP_MOCK_MODE=oversized-line    — emit an oversized notification line after session/new
+//	ACP_MOCK_MODE=dump-mcp          — write received mcpServers to ACP_MOCK_DUMP_FILE
 package main
 
 import (
@@ -126,6 +127,8 @@ func handleSessionNew(req *rpcRequest) {
 	}
 	_ = json.Unmarshal(req.Params, &params)
 
+	dumpMCPServers("session/new", req.Params)
+
 	sessionID := "mock-session-001"
 	if mode == "echo-cwd" {
 		sessionID = "cwd-" + sanitizeCWD(params.CWD)
@@ -177,6 +180,7 @@ func handleSessionLoad(req *rpcRequest) {
 		respondError(req.ID, -32000, "session not found")
 		return
 	}
+	dumpMCPServers("session/load", req.Params)
 	// LoadSessionResult has NO sessionId field.
 	respond(req.ID, map[string]any{
 		"models": map[string]any{
@@ -440,6 +444,31 @@ func notifyUpdate(sessionID string, update any) {
 		"method":  "session/update",
 		"params":  json.RawMessage(paramsData),
 	})
+}
+
+// dumpMCPServers writes the raw mcpServers field of the request params to
+// ACP_MOCK_DUMP_FILE when ACP_MOCK_MODE=dump-mcp. Used to assert that the
+// engine passes MCP server descriptors through to session/new and session/load
+// verbatim (agentrun does not implement MCP, only passes descriptors).
+func dumpMCPServers(method string, params json.RawMessage) {
+	if mode != "dump-mcp" {
+		return
+	}
+	f := os.Getenv("ACP_MOCK_DUMP_FILE")
+	if f == "" {
+		return
+	}
+	var p struct {
+		MCPServers json.RawMessage `json:"mcpServers"`
+	}
+	_ = json.Unmarshal(params, &p)
+	if len(p.MCPServers) == 0 {
+		p.MCPServers = json.RawMessage("[]")
+	}
+	line := method + " " + string(p.MCPServers) + "\n"
+	if err := os.WriteFile(f, []byte(line), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "mock-acp: dump: %v\n", err)
+	}
 }
 
 // sanitizeCWD makes a CWD path safe for use in a session ID.

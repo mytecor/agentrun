@@ -1496,3 +1496,111 @@ func TestEngine_SendBlocks(t *testing.T) {
 		t.Errorf("text deltas = %q, want %q", deltaText, mockTextContent)
 	}
 }
+
+// --- MCP server descriptor passthrough (session/new and session/load) ---
+//
+// Main invariant: agentrun does not implement MCP. It only passes MCP server
+// descriptors from Session.MCPServers into the ACP session/new and session/load
+// "mcpServers" field, verbatim and in order.
+
+// runDumpMCPServers starts a session against the dump-mcp mock and returns the
+// raw "mcpServers" line the mock recorded for the given session method.
+// The method is "session/new" or "session/load".
+func runDumpMCPServers(t *testing.T, method string, session agentrun.Session) string {
+	t.Helper()
+	mustBuild(t) // ensure mockBinaryPath is populated
+	dumpFile := filepath.Join(t.TempDir(), "mcp-dump.txt")
+	// writeScript sets ACP_MOCK_MODE via env; build a wrapper that also sets
+	// ACP_MOCK_DUMP_FILE to the dump file.
+	wrapperDir := t.TempDir()
+	wrapper2 := filepath.Join(wrapperDir, "mock-acp-dump-wrapper")
+	script := fmt.Sprintf("#!/bin/sh\nexport ACP_MOCK_MODE=dump-mcp\nexport ACP_MOCK_DUMP_FILE=%s\nexec %s \"$@\"\n", dumpFile, mockBinaryPath)
+	if err := os.WriteFile(wrapper2, []byte(script), 0o600); err != nil {
+		t.Fatalf("write dump wrapper: %v", err)
+	}
+	if err := os.Chmod(wrapper2, 0o755); err != nil {
+		t.Fatalf("chmod dump wrapper: %v", err)
+	}
+
+	engine := acp.NewEngine(acp.WithBinary(wrapper2))
+	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
+	defer cancel()
+
+	proc, err := engine.Start(ctx, session)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = proc.Stop(context.Background()) })
+
+	// Drain MessageInit.
+	msg := <-proc.Output()
+	if msg.Type != agentrun.MessageInit {
+		t.Fatalf("type = %q, want %q", msg.Type, agentrun.MessageInit)
+	}
+
+	// The mock writes the dump on session/new or session/load, which happens
+	// during Start (before MessageInit). The file exists after Start returns.
+	b, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("read dump file: %v", err)
+	}
+	lines := strings.SplitN(strings.TrimSpace(string(b)), " ", 2)
+	if len(lines) != 2 {
+		t.Fatalf("malformed dump: %q", b)
+	}
+	if lines[0] != method {
+		t.Errorf("dump method = %q, want %q", lines[0], method)
+	}
+	return lines[1]
+}
+
+func TestEngine_MCPServers_Empty_SessionNew(t *testing.T) {
+	got := runDumpMCPServers(t, "session/new", agentrun.Session{CWD: t.TempDir()})
+	if got != "[]" {
+		t.Errorf("mcpServers on wire = %s, want []", got)
+	}
+}
+
+func TestEngine_MCPServers_One_SessionNew(t *testing.T) {
+	got := runDumpMCPServers(t, "session/new", agentrun.Session{
+		CWD: t.TempDir(),
+		MCPServers: []agentrun.MCPServer{
+			{Name: "tools", Command: "tool-server", Args: []string{"--stdio"}},
+		},
+	})
+	want := `[{"name":"tools","command":"tool-server","args":["--stdio"]}]`
+	if got != want {
+		t.Errorf("mcpServers on wire = %s\nwant                  = %s", got, want)
+	}
+}
+
+func TestEngine_MCPServers_One_SessionLoad(t *testing.T) {
+	got := runDumpMCPServers(t, "session/load", agentrun.Session{
+		CWD: t.TempDir(),
+		Options: map[string]string{
+			agentrun.OptionResumeID: "existing-session-123",
+		},
+		MCPServers: []agentrun.MCPServer{
+			{Name: "tools", Command: "tool-server", Args: []string{"--stdio"}},
+		},
+	})
+	want := `[{"name":"tools","command":"tool-server","args":["--stdio"]}]`
+	if got != want {
+		t.Errorf("mcpServers on wire = %s\nwant                  = %s", got, want)
+	}
+}
+
+func TestEngine_MCPServers_Multiple_Order_SessionNew(t *testing.T) {
+	got := runDumpMCPServers(t, "session/new", agentrun.Session{
+		CWD: t.TempDir(),
+		MCPServers: []agentrun.MCPServer{
+			{Name: "client-tools", Command: "client-tools-mcp"},
+			{Name: "second", Command: "second-server", Args: []string{"--port", "9000"}},
+			{Name: "third", Command: "third-server"},
+		},
+	})
+	want := `[{"name":"client-tools","command":"client-tools-mcp","args":[]},{"name":"second","command":"second-server","args":["--port","9000"]},{"name":"third","command":"third-server","args":[]}]`
+	if got != want {
+		t.Errorf("mcpServers on wire = %s\nwant                  = %s", got, want)
+	}
+}
